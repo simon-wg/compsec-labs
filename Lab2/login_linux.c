@@ -18,17 +18,36 @@
 #define FALSE 0
 #define LENGTH 16
 #define MAX_AGE 10
+#define MAX_ATTEMPTS 3
+#define SHELL "sh"
 
-void sighandler() {
+
+
+void setup_sighandler() {
 
 	/* add signalhandling routines here */
 	/* see 'man 2 signal' */
+	//signal(SIGINT, SIG_IGN);  /* ctrl+c */
+	signal(SIGTSTP, SIG_IGN);  /* ctrl+z */
+	signal(SIGQUIT, SIG_IGN);  /* ctrl+\ */
+}
+
+void start_shell(int uid) {
+	if (setuid(uid) == -1) {
+		printf("Failed to set the UID.\n");
+		return;
+	}
+	char *args[] = {SHELL, NULL};
+	if (execvp(SHELL, args) == -1) {
+		printf("Failed to start shell.\n");
+	}
 }
 
 int main(int argc, char *argv[]) {
 
 	// struct passwd *passwddata; /* this has to be redefined in step 2 */
 	/* see pwent.h */
+
 	mypwent* ent;
 
 	char important1[LENGTH] = "**IMPORTANT 1**";
@@ -41,7 +60,7 @@ int main(int argc, char *argv[]) {
 	char prompt[] = "password: ";
 	char *user_pass;
 
-	sighandler();
+	setup_sighandler();
 
 	while (TRUE) {
 		/* check what important variable contains - do not remove, part of buffer overflow test */
@@ -58,7 +77,7 @@ int main(int argc, char *argv[]) {
 		if (fgets(user, LENGTH, stdin) == NULL) /* gets() is vulnerable to buffer */
 			exit(0); /*  overflow attacks.  */
 		
-		for(int ptr = 0; ptr < LENGTH; ptr++){
+		for(int ptr = 0; ptr < LENGTH; ptr++){  // replace newline with string terminator for fgets
 			if (user[ptr] == '\n')
 				user[ptr] = '\0';
 		}
@@ -80,7 +99,17 @@ int main(int argc, char *argv[]) {
 			/* You have to encrypt user_pass for this to work */
 			/* Don't forget to include the salt */
 
-		if (!strcmp(user_pass, ent->passwd)) {
+		if (ent->pwfailed >= MAX_ATTEMPTS) {
+			printf("Too many failed login attempts\n");
+			// Resetting counter here for debugging purposes
+			ent->pwfailed = 0;  // basic implementation, would have to be more sophistiacted in real life scenarios
+			mysetpwent(user, ent);
+			break;
+		}
+
+		// Currently we're using "pass" as the password
+		// salt is XZ
+		if (!strcmp(crypt(user_pass, ent->passwd_salt), ent->passwd)) {
 			ent->pwfailed = 0;
 			printf("You're in !\n");
 			int attempts = ++ent->pwage;
@@ -88,6 +117,7 @@ int main(int argc, char *argv[]) {
 				printf("You need to renew your password >:( \n");
 
 			mysetpwent(user, ent);
+			start_shell(ent->uid);
 			continue;
 
 			/*  check UID, see setuid(2) */
